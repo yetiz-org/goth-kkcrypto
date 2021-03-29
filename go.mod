@@ -1,0 +1,1 @@
+module "github.com/kklab-com/goth-kkcrypto"
