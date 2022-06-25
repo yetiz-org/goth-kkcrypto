@@ -20,6 +20,8 @@ func TestNewES256(t *testing.T) {
 		assert.Equal(t, es.D().String(), (&big.Int{}).SetBytes(es.PrivateKey().Bytes()).String())
 		assert.Equal(t, 32, len(es.PrivateKey().Bytes()))
 		assert.Equal(t, 65, len(es.PublicKey().Bytes()))
+		assert.Equal(t, 33, len(es.PublicKey().CompressedBytes()))
+		assert.Equal(t, es.X().Bytes(), es.PublicKey().CompressedBytes()[1:])
 		assert.NotEmpty(t, es.PrivateKey().PEM())
 		assert.NotEmpty(t, es.PublicKey().PEM())
 	}
@@ -35,6 +37,8 @@ func TestNewES384(t *testing.T) {
 		assert.Equal(t, es.D().String(), (&big.Int{}).SetBytes(es.PrivateKey().Bytes()).String())
 		assert.Equal(t, 48, len(es.PrivateKey().Bytes()))
 		assert.Equal(t, 97, len(es.PublicKey().Bytes()))
+		assert.Equal(t, 49, len(es.PublicKey().CompressedBytes()))
+		assert.Equal(t, es.X().Bytes(), es.PublicKey().CompressedBytes()[1:])
 		assert.NotEmpty(t, es.PrivateKey().PEM())
 		assert.NotEmpty(t, es.PublicKey().PEM())
 	}
@@ -62,6 +66,8 @@ func TestNewES512(t *testing.T) {
 		assert.Equal(t, eso.D().String(), (&big.Int{}).SetBytes(es.PrivateKey().Bytes()).String())
 		assert.Equal(t, 66, len(es.PrivateKey().Bytes()))
 		assert.Equal(t, 133, len(es.PublicKey().Bytes()))
+		assert.Equal(t, 67, len(es.PublicKey().CompressedBytes()))
+		assert.Equal(t, es.PublicKey().Bytes()[1:67], es.PublicKey().CompressedBytes()[1:])
 		assert.NotEmpty(t, es.PrivateKey().PEM())
 		assert.NotEmpty(t, es.PublicKey().PEM())
 	}

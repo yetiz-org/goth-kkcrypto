@@ -70,6 +70,18 @@ func (k *PublicKey) Bytes() []byte {
 	return append(append([]byte{0x04}, x...), y...)
 }
 
+func (k *PublicKey) CompressedBytes() []byte {
+	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
+	x := make([]byte, keySize)
+	ox := k.X.Bytes()
+	copy(x[keySize-len(ox):], ox)
+	if k.Y.Bit(0) == 0 {
+		return append([]byte{0x02}, x...)
+	} else {
+		return append([]byte{0x03}, x...)
+	}
+}
+
 func (k *PublicKey) Hex() string {
 	return strings.ToUpper(hex.EncodeToString(k.Bytes()))
 }
