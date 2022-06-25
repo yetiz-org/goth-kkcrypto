@@ -5,11 +5,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"hash"
 	"io"
 	"math"
 	"math/big"
+	"strings"
 )
 
 const byteBase = float64(8)
@@ -19,33 +21,92 @@ type PEM interface {
 	PEMPublicKey() string
 }
 
-type ES interface {
-	X() *big.Int
-	Y() *big.Int
-	D() *big.Int
-	Curve() EllipticCurve
-	PrivateKey() *ecdsa.PrivateKey
-	PublicKey() *ecdsa.PublicKey
-	Hash() hash.Hash
-	Sign(data []byte) []byte
-	Verify(data []byte, signature []byte) bool
-	PEM
+type Public interface {
+	Key() *ecdsa.PublicKey
+	PEM() string
+	Verify(data []byte, signature []byte, hash hash.Hash) bool
+	Bytes() []byte
+	Hex() string
 }
 
-type es struct {
-	private *ecdsa.PrivateKey
-	hash    crypto.Hash
+type PublicKey ecdsa.PublicKey
+
+func (k *PublicKey) Key() *ecdsa.PublicKey {
+	return (*ecdsa.PublicKey)(k)
 }
 
-func (e *es) Hash() hash.Hash {
-	return e.hash.New()
+func (k *PublicKey) PEM() string {
+	x509Encoded, _ := x509.MarshalPKIXPublicKey(k.Key())
+	pemEncoded := pem.EncodeToMemory(&pem.Block{
+		Type:  "EC PUBLIC KEY",
+		Bytes: x509Encoded,
+	})
+
+	return string(pemEncoded)
 }
 
-func (e *es) Sign(data []byte) []byte {
-	hasher := e.Hash()
+func (k *PublicKey) Verify(data []byte, signature []byte, hash hash.Hash) bool {
+	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
+	if len(signature) != 2*keySize {
+		return false
+	}
+
+	r := big.NewInt(0).SetBytes(signature[:keySize])
+	s := big.NewInt(0).SetBytes(signature[keySize:])
+	hasher := hash
 	hasher.Write(data)
-	if r, s, err := ecdsa.Sign(rand.Reader, e.PrivateKey(), hasher.Sum(nil)); err == nil {
-		keySize := int(math.Ceil(float64(e.PrivateKey().Curve.Params().BitSize) / byteBase))
+	return ecdsa.Verify((*ecdsa.PublicKey)(k), hasher.Sum(nil), r, s)
+
+}
+
+func (k *PublicKey) Bytes() []byte {
+	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
+	x := make([]byte, keySize)
+	ox := k.X.Bytes()
+	copy(x[keySize-len(ox):], ox)
+	y := make([]byte, keySize)
+	oy := k.Y.Bytes()
+	copy(y[keySize-len(oy):], oy)
+	return append(append([]byte{0x04}, x...), y...)
+}
+
+func (k *PublicKey) Hex() string {
+	return strings.ToUpper(hex.EncodeToString(k.Bytes()))
+}
+
+type Private interface {
+	PEM() string
+	Key() *ecdsa.PrivateKey
+	Public() PublicKey
+	Sign(data []byte, hash hash.Hash) []byte
+	Bytes() []byte
+	PrivateKeyHex() string
+}
+
+type PrivateKey ecdsa.PrivateKey
+
+func (k *PrivateKey) PEM() string {
+	x509Encoded, _ := x509.MarshalECPrivateKey(k.Key())
+	pemEncoded := pem.EncodeToMemory(&pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: x509Encoded,
+	})
+
+	return string(pemEncoded)
+}
+
+func (k *PrivateKey) Key() *ecdsa.PrivateKey {
+	return (*ecdsa.PrivateKey)(k)
+}
+
+func (k *PrivateKey) Public() PublicKey {
+	return PublicKey(k.PublicKey)
+}
+
+func (k *PrivateKey) Sign(data []byte, hash hash.Hash) []byte {
+	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
+	hash.Write(data)
+	if r, s, err := ecdsa.Sign(rand.Reader, k.Key(), hash.Sum(nil)); err == nil {
 		rBytes := r.Bytes()
 		rBytesPadded := make([]byte, keySize)
 		copy(rBytesPadded[keySize-len(rBytes):], rBytes)
@@ -59,79 +120,75 @@ func (e *es) Sign(data []byte) []byte {
 	return nil
 }
 
-func (e *es) Verify(data []byte, signature []byte) bool {
-	keySize := int(math.Ceil(float64(e.PrivateKey().Curve.Params().BitSize) / byteBase))
-	if len(signature) != 2*keySize {
-		return false
-	}
-
-	r := big.NewInt(0).SetBytes(signature[:keySize])
-	s := big.NewInt(0).SetBytes(signature[keySize:])
-	hasher := e.Hash()
-	hasher.Write(data)
-	return ecdsa.Verify(e.PublicKey(), hasher.Sum(nil), r, s)
+func (k *PrivateKey) Bytes() []byte {
+	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
+	d := make([]byte, keySize)
+	od := k.D.Bytes()
+	copy(d[keySize-len(od):], od)
+	return d
 }
 
-func (e *es) X() *big.Int {
-	return e.private.X
+func (k *PrivateKey) PrivateKeyHex() string {
+	return strings.ToUpper(hex.EncodeToString(k.Bytes()))
 }
 
-func (e *es) Y() *big.Int {
-	return e.private.Y
+type ES struct {
+	Private *PrivateKey
+	HashId  crypto.Hash
 }
 
-func (e *es) D() *big.Int {
-	return e.private.D
+func (e *ES) Hash() hash.Hash {
+	return e.HashId.New()
 }
 
-func (e *es) Curve() EllipticCurve {
-	return e.private.Curve
+func (e *ES) Sign(data []byte) []byte {
+	return e.Private.Sign(data, e.Hash())
 }
 
-func (e *es) PrivateKey() *ecdsa.PrivateKey {
-	return e.private
+func (e *ES) Verify(data []byte, signature []byte) bool {
+	return e.PublicKey().Verify(data, signature, e.Hash())
 }
 
-func (e *es) PublicKey() *ecdsa.PublicKey {
-	return &e.private.PublicKey
+func (e *ES) X() *big.Int {
+	return e.Private.X
 }
 
-func (e *es) PEMPrivateKey() string {
-	x509Encoded, _ := x509.MarshalECPrivateKey(e.PrivateKey())
-	pemEncoded := pem.EncodeToMemory(&pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: x509Encoded,
-	})
-
-	return string(pemEncoded)
+func (e *ES) Y() *big.Int {
+	return e.Private.Y
 }
 
-func (e *es) PEMPublicKey() string {
-	x509Encoded, _ := x509.MarshalPKIXPublicKey(e.PublicKey())
-	pemEncoded := pem.EncodeToMemory(&pem.Block{
-		Type:  "EC PUBLIC KEY",
-		Bytes: x509Encoded,
-	})
-
-	return string(pemEncoded)
+func (e *ES) D() *big.Int {
+	return e.Private.D
 }
 
-func NewRawES(curve EllipticCurve, rand io.Reader, hash crypto.Hash) ES {
-	es := &es{
-		hash: hash,
+func (e *ES) Curve() EllipticCurve {
+	return e.Private.Curve
+}
+
+func (e *ES) PrivateKey() *PrivateKey {
+	return e.Private
+}
+
+func (e *ES) PublicKey() *PublicKey {
+	return (*PublicKey)(&e.Private.PublicKey)
+}
+
+func NewRawES(curve EllipticCurve, rand io.Reader, hash crypto.Hash) *ES {
+	es := &ES{
+		HashId: hash,
 	}
 
 	if private, err := ecdsa.GenerateKey(curve, rand); err != nil {
 		panic(err)
 	} else {
-		es.private = private
+		es.Private = (*PrivateKey)(private)
 	}
 
 	return es
 
 }
 
-func NewES(curve EllipticCurve) ES {
+func NewES(curve EllipticCurve) *ES {
 	if curve == nil {
 		return nil
 	}
@@ -148,14 +205,14 @@ func NewES(curve EllipticCurve) ES {
 	return nil
 }
 
-func NewES256() ES {
+func NewES256() *ES {
 	return NewES(P256())
 }
 
-func NewES384() ES {
+func NewES384() *ES {
 	return NewES(P384())
 }
 
-func NewES512() ES {
+func NewES512() *ES {
 	return NewES(P521())
 }
