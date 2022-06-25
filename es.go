@@ -3,6 +3,7 @@ package kkcrypto
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/hex"
@@ -227,4 +228,23 @@ func NewES384() *ES {
 
 func NewES512() *ES {
 	return NewES(P521())
+}
+
+func UnmarshalECPublicKey(curve EllipticCurve, bs []byte) *PublicKey {
+	var x, y *big.Int
+	if bs[0] == 4 {
+		x, y = elliptic.Unmarshal(curve, bs)
+	} else if bs[0] == 2 || bs[0] == 3 {
+		x, y = elliptic.UnmarshalCompressed(curve, bs)
+	}
+
+	if x == nil || y == nil {
+		return nil
+	}
+
+	return &PublicKey{
+		Curve: curve,
+		X:     x,
+		Y:     y,
+	}
 }
