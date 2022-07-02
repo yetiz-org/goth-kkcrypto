@@ -112,8 +112,9 @@ func (k *PrivateKey) Key() *ecdsa.PrivateKey {
 	return (*ecdsa.PrivateKey)(k)
 }
 
-func (k *PrivateKey) Public() PublicKey {
-	return PublicKey(k.PublicKey)
+func (k *PrivateKey) Public() *PublicKey {
+	pub := PublicKey(k.PublicKey)
+	return &pub
 }
 
 func (k *PrivateKey) Sign(data []byte, hash hash.Hash) []byte {
