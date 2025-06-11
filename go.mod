@@ -1,4 +1,4 @@
-module github.com/kklab-com/goth-kkcrypto
+module github.com/yetiz-org/goth-kkcrypto
 
 go 1.17
 
