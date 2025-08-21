@@ -12,24 +12,44 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"strings"
 )
 
-const byteBase = float64(8)
+const (
+	byteBase = float64(8)
+	
+	// Public key point format constants
+	UncompressedPointFormat = 0x04 // Uncompressed public key format
+	CompressedEvenYFormat   = 0x02 // Compressed format with even Y coordinate
+	CompressedOddYFormat    = 0x03 // Compressed format with odd Y coordinate
+)
 
+// PEM interface defines methods for encoding cryptographic keys in PEM format.
+// PEM (Privacy Enhanced Mail) is a base64 encoding format for cryptographic keys and certificates.
 type PEM interface {
+	// PEMPrivateKey returns the private key encoded in PEM format
 	PEMPrivateKey() string
+	// PEMPublicKey returns the public key encoded in PEM format
 	PEMPublicKey() string
 }
 
+// Public interface defines methods for ECDSA public key operations.
+// It provides functionality for signature verification, key encoding, and format conversion.
 type Public interface {
+	// Key returns the underlying ecdsa.PublicKey
 	Key() *ecdsa.PublicKey
+	// PEM returns the public key encoded in PEM format
 	PEM() string
+	// Verify verifies a signature against data using the specified hash algorithm
 	Verify(data []byte, signature []byte, hash hash.Hash) bool
+	// Bytes returns the public key as uncompressed point bytes
 	Bytes() []byte
+	// Hex returns the public key as uppercase hexadecimal string
 	Hex() string
 }
 
+// PublicKey represents an ECDSA public key.
+// It wraps the standard ecdsa.PublicKey and provides additional functionality
+// for encoding, verification, and format conversion.
 type PublicKey ecdsa.PublicKey
 
 func (k *PublicKey) Key() *ecdsa.PublicKey {
@@ -47,6 +67,14 @@ func (k *PublicKey) PEM() string {
 }
 
 func (k *PublicKey) Verify(data []byte, signature []byte, hash hash.Hash) bool {
+	// Input validation
+	if k == nil || k.Curve == nil || hash == nil {
+		return false
+	}
+	if len(data) == 0 || len(signature) == 0 {
+		return false
+	}
+	
 	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
 	if len(signature) != 2*keySize {
 		return false
@@ -54,9 +82,9 @@ func (k *PublicKey) Verify(data []byte, signature []byte, hash hash.Hash) bool {
 
 	r := big.NewInt(0).SetBytes(signature[:keySize])
 	s := big.NewInt(0).SetBytes(signature[keySize:])
-	hasher := hash
-	hasher.Write(data)
-	return ecdsa.Verify((*ecdsa.PublicKey)(k), hasher.Sum(nil), r, s)
+	hash.Reset()
+	hash.Write(data)
+	return ecdsa.Verify((*ecdsa.PublicKey)(k), hash.Sum(nil), r, s)
 
 }
 
@@ -68,7 +96,7 @@ func (k *PublicKey) Bytes() []byte {
 	y := make([]byte, keySize)
 	oy := k.Y.Bytes()
 	copy(y[keySize-len(oy):], oy)
-	return append(append([]byte{0x04}, x...), y...)
+	return append(append([]byte{UncompressedPointFormat}, x...), y...)
 }
 
 func (k *PublicKey) CompressedBytes() []byte {
@@ -77,25 +105,48 @@ func (k *PublicKey) CompressedBytes() []byte {
 	ox := k.X.Bytes()
 	copy(x[keySize-len(ox):], ox)
 	if k.Y.Bit(0) == 0 {
-		return append([]byte{0x02}, x...)
+		return append([]byte{CompressedEvenYFormat}, x...)
 	} else {
-		return append([]byte{0x03}, x...)
+		return append([]byte{CompressedOddYFormat}, x...)
 	}
 }
 
 func (k *PublicKey) Hex() string {
-	return strings.ToUpper(hex.EncodeToString(k.Bytes()))
+	// Optimize string operations by pre-allocating buffer
+	bytes := k.Bytes()
+	hexStr := make([]byte, hex.EncodedLen(len(bytes)))
+	hex.Encode(hexStr, bytes)
+	
+	// Convert to uppercase in-place for better performance
+	for i := 0; i < len(hexStr); i++ {
+		if hexStr[i] >= 'a' && hexStr[i] <= 'f' {
+			hexStr[i] -= 32 // Convert to uppercase
+		}
+	}
+	
+	return string(hexStr)
 }
 
+// Private interface defines methods for ECDSA private key operations.
+// It provides functionality for digital signing, key encoding, and format conversion.
 type Private interface {
+	// PEM returns the private key encoded in PEM format
 	PEM() string
+	// Key returns the underlying ecdsa.PrivateKey
 	Key() *ecdsa.PrivateKey
+	// Public returns the corresponding public key
 	Public() PublicKey
+	// Sign creates a digital signature of data using the specified hash algorithm
 	Sign(data []byte, hash hash.Hash) []byte
+	// Bytes returns the private key as byte slice
 	Bytes() []byte
+	// PrivateKeyHex returns the private key as uppercase hexadecimal string
 	PrivateKeyHex() string
 }
 
+// PrivateKey represents an ECDSA private key.
+// It wraps the standard ecdsa.PrivateKey and provides additional functionality
+// for signing, encoding, and format conversion.
 type PrivateKey ecdsa.PrivateKey
 
 func (k *PrivateKey) PEM() string {
@@ -112,13 +163,21 @@ func (k *PrivateKey) Key() *ecdsa.PrivateKey {
 	return (*ecdsa.PrivateKey)(k)
 }
 
-func (k *PrivateKey) Public() *PublicKey {
-	pub := PublicKey(k.PublicKey)
-	return &pub
+func (k *PrivateKey) Public() PublicKey {
+	return PublicKey(k.PublicKey)
 }
 
 func (k *PrivateKey) Sign(data []byte, hash hash.Hash) []byte {
+	// Input validation
+	if k == nil || k.Curve == nil || hash == nil {
+		return nil
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	
 	keySize := int(math.Ceil(float64(k.Curve.Params().BitSize) / byteBase))
+	hash.Reset()
 	hash.Write(data)
 	if r, s, err := ecdsa.Sign(rand.Reader, k.Key(), hash.Sum(nil)); err == nil {
 		rBytes := r.Bytes()
@@ -143,7 +202,19 @@ func (k *PrivateKey) Bytes() []byte {
 }
 
 func (k *PrivateKey) PrivateKeyHex() string {
-	return strings.ToUpper(hex.EncodeToString(k.Bytes()))
+	// Optimize string operations by pre-allocating buffer
+	bytes := k.Bytes()
+	hexStr := make([]byte, hex.EncodedLen(len(bytes)))
+	hex.Encode(hexStr, bytes)
+	
+	// Convert to uppercase in-place for better performance
+	for i := 0; i < len(hexStr); i++ {
+		if hexStr[i] >= 'a' && hexStr[i] <= 'f' {
+			hexStr[i] -= 32 // Convert to uppercase
+		}
+	}
+	
+	return string(hexStr)
 }
 
 type ES struct {
@@ -232,11 +303,19 @@ func NewES512() *ES {
 }
 
 func UnmarshalECPublicKey(curve EllipticCurve, bs []byte) *PublicKey {
+	// Input validation
+	if curve == nil || len(bs) == 0 {
+		return nil
+	}
+	
 	var x, y *big.Int
-	if bs[0] == 4 {
+	if bs[0] == UncompressedPointFormat {
 		x, y = elliptic.Unmarshal(curve, bs)
-	} else if bs[0] == 2 || bs[0] == 3 {
+	} else if bs[0] == CompressedEvenYFormat || bs[0] == CompressedOddYFormat {
 		x, y = elliptic.UnmarshalCompressed(curve, bs)
+	} else {
+		// Unknown point format
+		return nil
 	}
 
 	if x == nil || y == nil {
